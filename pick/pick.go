@@ -1,17 +1,23 @@
 package pick
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	// Provides list model
 	tea "github.com/charmbracelet/bubbletea" // Framework for building terminal applications
 	"github.com/charmbracelet/lipgloss"      // Styles terminal UI components
+	"github.com/nmeilick/go-ui"
 )
 
 // Model represents a selectable list component.
 type Model struct {
 	items             []string       // items is the list of items to select from.
 	label             string         // label is the label for the list.
+	cancelable        bool           // cancelable determines if selection can be canceled with escape key
+	quitable          bool           // quitable determines if execution can be quit via ctrl+c
 	selectedIdx       int            // selectedIdx is the index of the currently selected item.
 	labelStyle        lipgloss.Style // labelStyle is the style for the label.
 	selectedItemStyle lipgloss.Style // selectedItemStyle is the style for the selected item.
@@ -19,6 +25,32 @@ type Model struct {
 	selectedFormat    string         // selectedFormat is the format string for the selected item.
 	normalFormat      string         // normalFormat is the format string for normal (unselected) items.
 	horizontal        bool           // horizontal indicates if the items should be displayed horizontally.
+
+	canceled bool // canceled indicates whether the selection was canceled
+	quit     bool // quit indicates whether the selection was quit
+}
+
+// Canceled returns the canceled flag.
+func (m *Model) Canceled() bool {
+	return m.canceled
+}
+
+// Quit returns the quit flag.
+func (m *Model) Quit() bool {
+	return m.quit
+}
+
+// SelectedIdx returns the index of the selected item.
+func (m *Model) SelectedIdx() int {
+	return m.selectedIdx
+}
+
+// SelectedItem returns the selected item, or an empty string if no selection was performed.
+func (m *Model) SelectedItem() string {
+	if m.selectedIdx >= 0 && m.selectedIdx < len(m.items) {
+		return m.items[m.selectedIdx]
+	}
+	return ""
 }
 
 // New creates and returns a new Model with the given items.
@@ -26,6 +58,8 @@ func New(items []string) *Model {
 	return &Model{
 		items:             items,
 		label:             "",
+		cancelable:        true,
+		quitable:          true,
 		selectedIdx:       0,
 		labelStyle:        lipgloss.NewStyle().Foreground(lipgloss.Color("#FFD700")).Bold(true), // Gold
 		selectedItemStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),            // Bright Green
@@ -33,6 +67,9 @@ func New(items []string) *Model {
 		selectedFormat:    "►%s◄",
 		normalFormat:      " %s ",
 		horizontal:        false,
+
+		canceled: false,
+		quit:     false,
 	}
 }
 
@@ -40,6 +77,20 @@ func New(items []string) *Model {
 func (m *Model) WithLabel(label string) *Model {
 	newModel := *m
 	newModel.label = label
+	return &newModel
+}
+
+// WithCancel sets the cancelable flag and returns a new Model with the updated flag.
+func (m *Model) WithCancel(cancelable bool) *Model {
+	newModel := *m
+	newModel.cancelable = cancelable
+	return &newModel
+}
+
+// WithQuit sets the quitable flag and returns a new Model with the updated flag.
+func (m *Model) WithQuit(quitable bool) *Model {
+	newModel := *m
+	newModel.quitable = quitable
 	return &newModel
 }
 
@@ -123,11 +174,6 @@ func (m *Model) Init() tea.Cmd {
 	return nil
 }
 
-// SelectedItem returns the currently selected item.
-func (m *Model) SelectedItem() string {
-	return m.items[m.selectedIdx]
-}
-
 // Update handles user input and updates the list state by processing key messages and updating the selected index accordingly.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -144,10 +190,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIdx = 0
 			}
 		case "enter":
+			m.canceled = false
+			m.quit = false
 			return m, tea.Quit
-		case "esc", "ctrl+c":
-			m.selectedIdx = -1
-			return m, tea.Quit
+		case "esc":
+			if m.cancelable {
+				m.selectedIdx = -1
+				m.canceled = true
+				m.quit = false
+				return m, tea.Quit
+			}
+		case "ctrl+c":
+			if m.quitable {
+				m.selectedIdx = -1
+				m.canceled = false
+				m.quit = true
+				return m, tea.Quit
+			}
 		}
 	}
 	return m, nil
@@ -193,14 +252,16 @@ func (m *Model) View() string {
 	return b.String()
 }
 
-// Pick asks to pick an item and return its index (-1 if selection was aborted) or an error.
+// Pick asks to pick an item and return its index or an error.
+// Use errors.Is(ui.Canceled) or errors.Is(ui.Quit) to determine if the selection
+// was canceled or aborting of the program was requested.
 func Pick(label string, horizontal bool, idx int, items ...string) (int, error) {
 	if len(items) == 0 {
 		items = []string{"yes", "no"}
 	}
 	m := New(items).WithLabel(label).WithSelectedIndex(idx).WithHorizontal(horizontal)
-	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
+	_, err := tea.NewProgram(m).Run()
+	if err = ui.ErrorOrValidate(err, m); err != nil {
 		return -1, err
 	}
 	return m.selectedIdx, nil
@@ -210,10 +271,30 @@ func Pick(label string, horizontal bool, idx int, items ...string) (int, error) 
 func Showcase() {
 	items := []string{"Apple", "Banana", "Cherry"}
 
-	// Create a vertical list with default style
-	defaultStyleList := New(items).
-		WithLabel("Default Style List")
+	handle := func(m *Model) {
+		_, err := tea.NewProgram(m).Run()
+		err = ui.ErrorOrValidate(err, m)
+		switch {
+		case errors.Is(err, ui.CanceledError):
+			fmt.Println("Canceled")
+		case errors.Is(err, ui.QuitError):
+			fmt.Println("Quit")
+			os.Exit(0)
+		case err != nil:
+			fmt.Printf("Error running program: %v", err)
+		default:
+			fmt.Printf("Picked item: %s (Index: %d)\n", m.SelectedItem(), m.SelectedIdx())
+		}
+	}
+	// Run interactive examples
+	fmt.Println("=== Model Showcase ===")
 
+	fmt.Println("\nDefault Style List (Use arrow keys to navigate, Enter to select):")
+	// Create a vertical list with default style
+	defaultStyleList := New(items).WithLabel("Default Style List")
+	handle(defaultStyleList)
+
+	fmt.Println("\nHorizontal List with Custom Colors (Use arrow keys to navigate, Enter to select):")
 	// Create a horizontal list with custom colors
 	horizontalList := New(items).
 		WithLabel("Horizontal List").
@@ -221,55 +302,12 @@ func Showcase() {
 		WithSelectedItemColor(lipgloss.Color("#FF4500")). // OrangeRed
 		WithNormalItemColor(lipgloss.Color("#98FB98")).   // PaleGreen
 		WithHorizontal(true)
+	handle(horizontalList)
 
 	// Create a vertical list with custom formats
 	customFormatList := New(items).
 		WithLabel("Custom Format List").
 		WithSelectedFormat("► %s ◄").
 		WithNormalFormat("  %s  ")
-
-	// Run interactive examples
-	fmt.Println("=== Model Showcase ===")
-
-	fmt.Println("\nDefault Style List (Use arrow keys to navigate, Enter to select):")
-	p := tea.NewProgram(defaultStyleList)
-	if model, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v", err)
-	} else {
-		if m, ok := model.(*Model); ok {
-			if m.selectedIdx >= 0 {
-				fmt.Printf("Picked item: %s (Index: %d)\n", m.SelectedItem(), m.selectedIdx)
-			} else {
-				fmt.Println("Aborted")
-			}
-		}
-	}
-
-	fmt.Println("\nHorizontal List with Custom Colors (Use arrow keys to navigate, Enter to select):")
-	p = tea.NewProgram(horizontalList)
-	if model, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v", err)
-	} else {
-		if m, ok := model.(*Model); ok {
-			if m.selectedIdx >= 0 {
-				fmt.Printf("Picked item: %s (Index: %d)\n", m.SelectedItem(), m.selectedIdx)
-			} else {
-				fmt.Println("Aborted")
-			}
-		}
-	}
-
-	fmt.Println("\nCustom Format List (Use arrow keys to navigate, Enter to select):")
-	p = tea.NewProgram(customFormatList)
-	if model, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v", err)
-	} else {
-		if m, ok := model.(*Model); ok {
-			if m.selectedIdx >= 0 {
-				fmt.Printf("Picked item: %s (Index: %d)\n", m.SelectedItem(), m.selectedIdx)
-			} else {
-				fmt.Println("Aborted")
-			}
-		}
-	}
+	handle(customFormatList)
 }
