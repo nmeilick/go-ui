@@ -1,21 +1,29 @@
 package input
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/charmbracelet/bubbles/help"      // Provides help view for key bindings
 	"github.com/charmbracelet/bubbles/key"       // Manages key bindings
 	"github.com/charmbracelet/bubbles/textinput" // Provides text input model
 	tea "github.com/charmbracelet/bubbletea"     // Framework for building terminal applications
 	"github.com/charmbracelet/lipgloss"          // Styles terminal UI components
+	"github.com/nmeilick/go-ui"
 )
 
 // Model is the model handling user input.
 type Model struct {
-	textInput textinput.Model // textInput is the text input model.
-	help      help.Model      // help is the help model for displaying key bindings.
-	keymap    keymap          // keymap is for managing key bindings.
-	abort     bool            // abort indicates if the input operation was aborted.
+	textInput  textinput.Model // textInput is the text input model.
+	help       help.Model      // help is the help model for displaying key bindings.
+	keymap     keymap          // keymap is for managing key bindings.
+	abort      bool            // abort indicates if the input operation was aborted.
+	cancelable bool            // cancelable determines if selection can be canceled with escape key
+	quitable   bool            // quitable determines if execution can be quit via ctrl+c
+
+	canceled bool // canceled indicates whether the selection was canceled
+	quit     bool // quit indicates whether the selection was quit
 }
 
 type keymap struct{}
@@ -50,9 +58,14 @@ func New() *Model {
 	km := keymap{}
 
 	return &Model{
-		textInput: ti,
-		help:      h,
-		keymap:    km,
+		textInput:  ti,
+		help:       h,
+		keymap:     km,
+		cancelable: true,
+		quitable:   true,
+
+		canceled: false,
+		quit:     false,
 	}
 }
 
@@ -107,6 +120,30 @@ func (m *Model) WithSuggestion(suggestions []string) *Model {
 	return &newModel
 }
 
+// WithCancel sets the cancelable flag and returns a new Model with the updated flag.
+func (m *Model) WithCancel(cancelable bool) *Model {
+	newModel := *m
+	newModel.cancelable = cancelable
+	return &newModel
+}
+
+// WithQuit sets the quitable flag and returns a new Model with the updated flag.
+func (m *Model) WithQuit(quitable bool) *Model {
+	newModel := *m
+	newModel.quitable = quitable
+	return &newModel
+}
+
+// Canceled returns the canceled flag.
+func (m *Model) Canceled() bool {
+	return m.canceled
+}
+
+// Quit returns the quit flag.
+func (m *Model) Quit() bool {
+	return m.quit
+}
+
 // Init initializes the Model, resets the abort flag, and returns a nil command.
 func (m *Model) Init() tea.Cmd {
 	m.abort = false
@@ -120,9 +157,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			m.canceled, m.quit = false, false
 			return m, tea.Quit
-		case "esc", "ctrl+c":
-			m.abort = true
+		case "esc":
+			m.canceled, m.quit = true, false
+			return m, tea.Quit
+		case "ctrl+c":
+			m.canceled, m.quit = true, true
 			return m, tea.Quit
 		}
 	}
@@ -146,17 +187,21 @@ func (m *Model) View() string {
 func Showcase() {
 	autocomplete := []string{"Apple", "Aardvark", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"}
 
-	defaultStyleInput := New().WithPrompt("Default Style Input: ").WithSuggestion(autocomplete)
+	m := New().WithPrompt("Default Style Input: ").WithSuggestion(autocomplete)
 	// Run interactive examples
 	fmt.Println("=== Model Showcase ===")
 
 	fmt.Println("\nDefault Style Input (Type to see suggestions, Enter to select):")
-	p := tea.NewProgram(defaultStyleInput)
-	if model, err := p.Run(); err != nil {
+	err := ui.Run(m)
+	switch {
+	case errors.Is(err, ui.QuitError):
+		fmt.Println("Quit")
+		os.Exit(0)
+	case errors.Is(err, ui.CanceledError):
+		fmt.Println("Canceled")
+	case err != nil:
 		fmt.Printf("Error running program: %v", err)
-	} else {
-		if inputModel, ok := model.(*Model); ok {
-			fmt.Printf("Final input: %s\n", inputModel.textInput.Value())
-		}
+	default:
+		fmt.Printf("Final input: %s\n", m.textInput.Value())
 	}
 }

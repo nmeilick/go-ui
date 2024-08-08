@@ -1,11 +1,14 @@
 package list
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/charmbracelet/bubbles/list"  // Provides list model
 	tea "github.com/charmbracelet/bubbletea" // Framework for building terminal applications
 	"github.com/charmbracelet/lipgloss"      // Styles terminal UI components
+	"github.com/nmeilick/go-ui"
 )
 
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
@@ -32,6 +35,11 @@ func (i *Item) FilterValue() string { return i.title }
 type Model struct {
 	List        list.Model // List is the list model.
 	selectedIdx int        // Selected is the index of the currently selected list item.
+	cancelable  bool       // cancelable determines if selection can be canceled with escape key
+	quitable    bool       // quitable determines if execution can be quit via ctrl+c
+
+	canceled bool // canceled indicates whether the selection was canceled
+	quit     bool // quit indicates whether the selection was quit
 }
 
 // New creates and returns a new Model with default settings.
@@ -42,7 +50,9 @@ func New(items ...*Item) *Model {
 	}
 	l := list.New(listItems, list.NewDefaultDelegate(), 0, 0)
 	return &Model{
-		List: l,
+		List:       l,
+		cancelable: true,
+		quitable:   true,
 	}
 }
 
@@ -65,6 +75,30 @@ func (m *Model) WithSelectedIndex(i int) *Model {
 	return &newModel
 }
 
+// WithCancel sets the cancelable flag and returns a new Model with the updated flag.
+func (m *Model) WithCancel(cancelable bool) *Model {
+	newModel := *m
+	newModel.cancelable = cancelable
+	return &newModel
+}
+
+// WithQuit sets the quitable flag and returns a new Model with the updated flag.
+func (m *Model) WithQuit(quitable bool) *Model {
+	newModel := *m
+	newModel.quitable = quitable
+	return &newModel
+}
+
+// Canceled returns the canceled flag.
+func (m *Model) Canceled() bool {
+	return m.canceled
+}
+
+// Quit returns the quit flag.
+func (m *Model) Quit() bool {
+	return m.quit
+}
+
 // Init initializes the Model and returns a nil command.
 func (m *Model) Init() tea.Cmd {
 	return nil
@@ -76,11 +110,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			m.canceled, m.quit = false, false
 			m.selectedIdx = m.List.Index()
 			return m, tea.Quit
-		case "ctrl+c", "esc":
-			m.selectedIdx = -1
-			return m, tea.Quit
+		case "esc":
+			if m.cancelable {
+				m.selectedIdx = -1
+				m.canceled, m.quit = true, false
+				return m, tea.Quit
+			}
+		case "ctrl+c":
+			if m.quitable {
+				m.selectedIdx = -1
+				m.canceled, m.quit = true, true
+				return m, tea.Quit
+			}
 		}
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
@@ -92,9 +136,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// SelectedItemIdx returns the index of the currently selected item.
-func (m *Model) SelectedItemIdx() int {
-	return m.selectedIdx
+// SelectedItem returns the selected item.
+func (m *Model) SelectedItem() *Item {
+	if item, ok := m.List.SelectedItem().(*Item); ok && item != nil {
+		return item
+	}
+	return nil
 }
 
 // View renders the list as a string, displaying the list items with their respective styles.
@@ -110,20 +157,21 @@ func Showcase() {
 		&Item{title: "Cherry", desc: "A small red fruit"},
 	}
 
-	defaultList := New(items...).WithSelectedIndex(0)
+	m := New(items...).WithSelectedIndex(0)
 	// Run interactive examples
 	fmt.Println("=== List Showcase ===")
 
 	fmt.Println("\nDefault List (Use arrow keys to navigate, Enter to select):")
-	p := tea.NewProgram(defaultList)
-	if _, err := p.Run(); err != nil {
+	err := ui.Run(m)
+	switch {
+	case errors.Is(err, ui.QuitError):
+		fmt.Println("Quit")
+		os.Exit(0)
+	case errors.Is(err, ui.CanceledError):
+		fmt.Println("Canceled")
+	case err != nil:
 		fmt.Printf("Error running program: %v", err)
-	}
-	switch idx := defaultList.SelectedItemIdx(); idx {
-	case -1:
-		fmt.Println("Aborted")
 	default:
-		item := items[idx]
-		fmt.Printf("Selected item: %s (#%d)\n", item.Title(), idx)
+		fmt.Printf("Selected item: %s\n", m.SelectedItem().Title())
 	}
 }

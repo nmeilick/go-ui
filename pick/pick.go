@@ -190,21 +190,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIdx = 0
 			}
 		case "enter":
-			m.canceled = false
-			m.quit = false
+			m.canceled, m.quit = false, false
 			return m, tea.Quit
 		case "esc":
 			if m.cancelable {
 				m.selectedIdx = -1
-				m.canceled = true
-				m.quit = false
+				m.canceled, m.quit = true, false
 				return m, tea.Quit
 			}
 		case "ctrl+c":
 			if m.quitable {
 				m.selectedIdx = -1
-				m.canceled = false
-				m.quit = true
+				m.canceled, m.quit = true, true
 				return m, tea.Quit
 			}
 		}
@@ -272,14 +269,13 @@ func Showcase() {
 	items := []string{"Apple", "Banana", "Cherry"}
 
 	handle := func(m *Model) {
-		_, err := tea.NewProgram(m).Run()
-		err = ui.ErrorOrValidate(err, m)
+		err := ui.Run(m)
 		switch {
-		case errors.Is(err, ui.CanceledError):
-			fmt.Println("Canceled")
 		case errors.Is(err, ui.QuitError):
 			fmt.Println("Quit")
 			os.Exit(0)
+		case errors.Is(err, ui.CanceledError):
+			fmt.Println("Canceled")
 		case err != nil:
 			fmt.Printf("Error running program: %v", err)
 		default:
