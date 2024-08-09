@@ -31,6 +31,11 @@ func (i *Item) Description() string { return i.desc }
 // FilterValue returns the value used for filtering the list item.
 func (i *Item) FilterValue() string { return i.title }
 
+// NewItem returns a new item.
+func NewItem(title, desc string) *Item {
+	return &Item{title: title, desc: desc}
+}
+
 // Model represents the list model.
 type Model struct {
 	List        list.Model // List is the list model.
