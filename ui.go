@@ -17,8 +17,8 @@ type StandardModel interface {
 	Quit() bool
 }
 
-func Run(m tea.Model) error {
-	_, err := tea.NewProgram(m).Run()
+func Run(m tea.Model, opts ...tea.ProgramOption) error {
+	_, err := tea.NewProgram(m, opts...).Run()
 	if m, ok := m.(StandardModel); ok {
 		err = ErrorOrValidate(err, m)
 	}
@@ -29,10 +29,10 @@ func ErrorOrValidate(err error, m StandardModel) error {
 	switch {
 	case err != nil:
 		return err
-	case m.Canceled():
-		return CanceledError
 	case m.Quit():
 		return QuitError
+	case m.Canceled():
+		return CanceledError
 	}
 	return nil
 }

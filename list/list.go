@@ -94,6 +94,14 @@ func (m *Model) WithQuit(quitable bool) *Model {
 	return &newModel
 }
 
+// WithTitle sets the list title and returns a new Model with the updated flag.
+func (m *Model) WithTitle(title string) *Model {
+	newModel := *m
+	newModel.List.Title = title
+	newModel.List.SetShowTitle(title != "")
+	return &newModel
+}
+
 // Canceled returns the canceled flag.
 func (m *Model) Canceled() bool {
 	return m.canceled
@@ -113,6 +121,9 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.List.FilterState() == list.Filtering {
+			break
+		}
 		switch msg.String() {
 		case "enter":
 			m.canceled, m.quit = false, false
@@ -167,7 +178,7 @@ func Showcase() {
 	fmt.Println("=== List Showcase ===")
 
 	fmt.Println("\nDefault List (Use arrow keys to navigate, Enter to select):")
-	err := ui.Run(m)
+	err := ui.Run(m, tea.WithAltScreen())
 	switch {
 	case errors.Is(err, ui.QuitError):
 		fmt.Println("Quit")

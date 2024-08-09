@@ -44,15 +44,19 @@ func (k keymap) FullHelp() [][]key.Binding {
 }
 
 // New creates and returns a new Model with default settings.
-func New() *Model {
+func New(prompt, value string, suggestions ...string) *Model {
 	ti := textinput.New()
+	ti.Prompt = prompt
+	ti.SetValue(value)
+	if len(suggestions) > 0 {
+		ti.SetSuggestions(suggestions)
+	}
 	ti.Placeholder = ""
-	ti.Prompt = ""
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
 	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
 	ti.Focus()
-	ti.CharLimit = 50
-	ti.Width = 20
+	ti.CharLimit = 100
+	ti.Width = 40
 	ti.ShowSuggestions = true
 	h := help.New()
 	km := keymap{}
@@ -134,6 +138,11 @@ func (m *Model) WithQuit(quitable bool) *Model {
 	return &newModel
 }
 
+// Value returns the current input.
+func (m *Model) Value() string {
+	return m.textInput.Value()
+}
+
 // Canceled returns the canceled flag.
 func (m *Model) Canceled() bool {
 	return m.canceled
@@ -176,7 +185,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the input widget as a string, displaying the prompt, text input, and help view for key bindings.
 func (m *Model) View() string {
 	return fmt.Sprintf(
-		"Pick a Charm™ repo:\n\n  %s\n\n%s\n\n",
+		"%s\n%s",
 		m.textInput.View(),
 		m.help.View(m.keymap),
 	)
@@ -187,7 +196,7 @@ func (m *Model) View() string {
 func Showcase() {
 	autocomplete := []string{"Apple", "Aardvark", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"}
 
-	m := New().WithPrompt("Default Style Input: ").WithSuggestion(autocomplete)
+	m := New("Default Style Input: ", "", autocomplete...)
 	// Run interactive examples
 	fmt.Println("=== Model Showcase ===")
 
